@@ -75,6 +75,18 @@ TARGET_HISTORY_FEATURES = [
 ]
 
 
+def calculate_wape(actual, predicted):
+    """Calculate weighted absolute percentage error."""
+    actual = np.asarray(actual, dtype=float)
+    predicted = np.asarray(predicted, dtype=float)
+
+    denominator = np.abs(actual).sum()
+    if denominator == 0:
+        return float("nan")
+
+    return float(np.abs(actual - predicted).sum() / denominator * 100)
+
+
 def add_history_features(data):
     """Create features using current and earlier observations only."""
     result = data.copy()
@@ -85,7 +97,6 @@ def add_history_features(data):
 
     for column in HISTORY_SOURCES:
         result[column] = pd.to_numeric(result[column], errors="coerce")
-
         station_values = result.groupby("station_id", sort=False)[column]
 
         # Earlier observed station values. Each row is five minutes.
@@ -111,7 +122,7 @@ def add_history_features(data):
     result["hour"] = result["timestamp"].dt.hour
     result["day_of_week"] = result["timestamp"].dt.dayofweek
 
-    # Cyclical time features help represent that 23:00 is near 00:00,
+    # Cyclical features represent that 23:00 is near 00:00,
     # and Sunday is near Monday.
     minute_of_day = (
         result["timestamp"].dt.hour * 60
@@ -229,7 +240,7 @@ for column in HISTORY_SOURCES:
             f"{column}_previous_mean_{window_steps * 5}m"
         )
 
-# Compare the original features with several experimental feature sets.
+# Compare the original features with the experimental feature sets.
 FEATURE_SETS = {
     "existing_features": BASE_NUMERIC_FEATURES,
     "with_existing_history": BASE_NUMERIC_FEATURES + HISTORY_FEATURES,
@@ -290,6 +301,28 @@ MODEL_OPTIONS = [
         "colsample_bytree": 0.8,
         "reg_lambda": 5.0,
     },
+    {
+        "name": "absolute_depth3",
+        "objective": "reg:absoluteerror",
+        "n_estimators": 500,
+        "max_depth": 3,
+        "learning_rate": 0.03,
+        "min_child_weight": 5,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "reg_lambda": 5.0,
+    },
+    {
+        "name": "absolute_depth4",
+        "objective": "reg:absoluteerror",
+        "n_estimators": 600,
+        "max_depth": 4,
+        "learning_rate": 0.03,
+        "min_child_weight": 5,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "reg_lambda": 5.0,
+    },
 ]
 
 
@@ -332,7 +365,7 @@ best_model = None
 best_numeric_features = None
 best_features = None
 best_description = None
-best_validation_mae = float("inf")
+best_validation_wape = float("inf")
 
 print("\nSelecting features and model settings using validation data:")
 
@@ -345,20 +378,28 @@ for feature_set_name, numeric_features in FEATURE_SETS.items():
         model.fit(validation_train[features], validation_train[TARGET])
 
         predictions = np.maximum(model.predict(validation[features]), 0)
-        mae = mean_absolute_error(validation[TARGET], predictions)
-        rmse = root_mean_squared_error(validation[TARGET], predictions)
+        actual = validation[TARGET].to_numpy()
+
+        mae = mean_absolute_error(actual, predictions)
+        rmse = root_mean_squared_error(actual, predictions)
+        wape = calculate_wape(actual, predictions)
 
         validation_scores.append(
             {
                 "model": description,
                 "validation_mae": mae,
                 "validation_rmse": rmse,
+                "validation_wape_pct": wape,
             }
         )
-        print(f"  {description:52s} MAE={mae:.3f}, RMSE={rmse:.3f}")
+        print(
+            f"  {description:52s} "
+            f"MAE={mae:.3f}, RMSE={rmse:.3f}, WAPE={wape:.2f}%"
+        )
 
-        if mae < best_validation_mae:
-            best_validation_mae = mae
+        # All candidates are scored on the same validation rows.
+        if wape < best_validation_wape:
+            best_validation_wape = wape
             best_model = options
             best_numeric_features = numeric_features
             best_features = features
@@ -369,7 +410,8 @@ pd.DataFrame(validation_scores).to_csv(
     index=False,
 )
 
-print(f"\nSelected on validation data: {best_description}")
+print(f"\nSelected on validation WAPE: {best_description}")
+print(f"Best validation WAPE: {best_validation_wape:.2f}%")
 
 # Train the selected model using all data available before the test period.
 xgb_model = make_pipeline(best_numeric_features, best_model)
@@ -444,15 +486,17 @@ for name, predictions in [
     ("Baseline", baseline),
 ]:
     valid = predictions.notna()
-    mae = mean_absolute_error(
-        results.loc[valid, TARGET],
-        predictions.loc[valid],
+    actual = results.loc[valid, TARGET].to_numpy()
+    predicted = predictions.loc[valid].to_numpy()
+
+    mae = mean_absolute_error(actual, predicted)
+    rmse = root_mean_squared_error(actual, predicted)
+    wape = calculate_wape(actual, predicted)
+
+    print(
+        f"  {name:8s} MAE={mae:.3f}, "
+        f"RMSE={rmse:.3f}, WAPE={wape:.2f}%"
     )
-    rmse = root_mean_squared_error(
-        results.loc[valid, TARGET],
-        predictions.loc[valid],
-    )
-    print(f"  {name:8s} MAE={mae:.3f}, RMSE={rmse:.3f}")
 
 results.to_csv(OUTPUT_DIR / "model_comparison_predictions.csv", index=False)
 
