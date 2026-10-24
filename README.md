@@ -6,8 +6,6 @@ This project uses synthetic warehouse data to forecast the number of transport r
 
 - **XGBoost:** main demand-forecasting model
 - **STGT:** spatio-temporal graph model experiment
-- **Prophet:** time-series comparison
-- **SimPy:** creates an illustrative simulated arrival scenario from the forecast
 
 ## Test results
 
@@ -35,3 +33,4 @@ Install the Python packages:
 ```powershell
 py -m pip install -r requirements.txt
 py -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+```

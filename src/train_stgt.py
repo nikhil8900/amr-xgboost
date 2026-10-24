@@ -16,7 +16,6 @@ STATE_FILE = DATA_DIR / "station_state_5min.csv"
 STATION_FILE = DATA_DIR / "station_master.csv"
 GRAPH_FILE = OUTPUT_DIR / "station_graph_edges.csv"
 XGB_FILE = OUTPUT_DIR / "model_comparison_predictions.csv"
-PROPHET_FILE = OUTPUT_DIR / "rolling_prophet_check.csv"
 
 TARGET = "demand_next_15min"
 LOOKBACK = 12
@@ -449,49 +448,6 @@ if XGB_FILE.exists():
             "XGBoost",
             common_xgb["actual_demand"],
             common_xgb["xgboost_prediction"],
-        )
-
-# Compare all models on the hourly rows where Prophet has predictions.
-if PROPHET_FILE.exists():
-    prophet_results = pd.read_csv(PROPHET_FILE, parse_dates=["timestamp"])
-    prophet_results["station_id"] = prophet_results["station_id"].astype(str)
-
-    results = results.merge(
-        prophet_results[
-            ["timestamp", "station_id", "prophet_prediction"]
-        ],
-        on=["timestamp", "station_id"],
-        how="left",
-    )
-
-    common_prophet = results.dropna(subset=["prophet_prediction"])
-    if not common_prophet.empty:
-        print(
-            f"\nShared hourly Prophet comparison rows: {len(common_prophet)}"
-        )
-        print_scores(
-            "STGT",
-            common_prophet["actual_demand"],
-            common_prophet["stgt_prediction"],
-        )
-
-        xgb_shared = common_prophet.dropna(subset=["xgboost_prediction"])
-        if not xgb_shared.empty:
-            print_scores(
-                "XGBoost",
-                xgb_shared["actual_demand"],
-                xgb_shared["xgboost_prediction"],
-            )
-
-        print_scores(
-            "Prophet",
-            common_prophet["actual_demand"],
-            common_prophet["prophet_prediction"],
-        )
-        print_scores(
-            "Baseline",
-            common_prophet["actual_demand"],
-            common_prophet["recent_demand_baseline"],
         )
 
 OUTPUT_DIR.mkdir(exist_ok=True)
