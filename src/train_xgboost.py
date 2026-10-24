@@ -3,7 +3,6 @@ from pathlib import Path
 import joblib
 import numpy as np
 import pandas as pd
-from prophet import Prophet
 from sklearn.compose import ColumnTransformer
 from sklearn.metrics import mean_absolute_error, root_mean_squared_error
 from sklearn.pipeline import Pipeline
@@ -40,7 +39,6 @@ BASE_NUMERIC_FEATURES = [
     "global_maintenance_amrs",
     "global_available_amrs",
     "avg_travel_time_min",
-    "avg_travel_time_min_ml",
     "hour",
     "day_of_week",
 ]
@@ -422,57 +420,10 @@ xgb_predictions = np.maximum(
     0,
 )
 
-# Prophet comparison on the same final training and test periods.
-prophet_predictions = []
-
-for station_id in sorted(test["station_id"].unique()):
-    station_train = final_train[final_train["station_id"] == station_id]
-    station_test = test[test["station_id"] == station_id]
-
-    if station_train.empty or station_test.empty:
-        continue
-
-    prophet_train = station_train[["timestamp", TARGET]].rename(
-        columns={"timestamp": "ds", TARGET: "y"}
-    )
-
-    prophet_model = Prophet(
-        daily_seasonality=True,
-        weekly_seasonality=True,
-        yearly_seasonality=False,
-        interval_width=0.80,
-    )
-    prophet_model.fit(prophet_train)
-
-    future = station_test[["timestamp"]].rename(
-        columns={"timestamp": "ds"}
-    )
-    prophet_forecast = prophet_model.predict(future)
-
-    station_result = station_test[
-        ["timestamp", "station_id", TARGET]
-    ].copy()
-    station_result["prophet_prediction"] = (
-        prophet_forecast["yhat"].clip(lower=0).to_numpy()
-    )
-    prophet_predictions.append(station_result)
-
 results = test[
     ["timestamp", "station_id", TARGET, "recent_demand_15min"]
 ].copy()
 results["xgboost_prediction"] = xgb_predictions
-
-if prophet_predictions:
-    prophet_results = pd.concat(prophet_predictions, ignore_index=True)
-    results = results.merge(
-        prophet_results[
-            ["timestamp", "station_id", "prophet_prediction"]
-        ],
-        on=["timestamp", "station_id"],
-        how="left",
-    )
-else:
-    results["prophet_prediction"] = np.nan
 
 baseline = pd.to_numeric(
     results["recent_demand_15min"],
@@ -482,7 +433,6 @@ baseline = pd.to_numeric(
 print("\nFinal test results:")
 for name, predictions in [
     ("XGBoost", results["xgboost_prediction"]),
-    ("Prophet", results["prophet_prediction"]),
     ("Baseline", baseline),
 ]:
     valid = predictions.notna()
