@@ -1,0 +1,9 @@
+data/
+outputs/
+__pycache__/
+.venv/
+venv/
+*.joblib
+*.pth
+*.json
+.env
